@@ -78,6 +78,27 @@ set.seed(1)
 Before getting into more complicated analyses, we will first try to fit a simple Poisson regression model (with overdispersion) where we adjust for seasonality and 1 control variable at a time. this allows us to see how the use of different controls influences the results
 
 The results are ordered by goodness of fit (based on AIC scores), with best fitting covariates on top.
+
+```{r}
+ds8<-analysis$.private$data$full$`8`
+ds8$date<-analysis[['time_points']]
+outcome<-ds8$outcome
+outcome.pre<-outcome
+outcome.pre[ds8$date>analysis$intervention_date] <-NA
+ds8$covar<-ds8$A41
+library(lubridate)
+mod1.qp<-glm(outcome.pre~ s1+s2+s3+s4+s5+s6+s7+s8+s9+s10+s11 +covar, family='quasipoisson', data=ds8)
+pred1<-predict(mod1.qp, type='response', newdata=ds8)
+
+plot(pred1, type='l')
+points(ds8$outcome)
+
+post.indices<- which(ds8$date == analysis$eval_period[1]):which(ds8$date == analysis$eval_period[2])
+rr<- sum(ds8$outcome[post.indices])/ sum(pred1[post.indices])
+rr
+```
+
+
 ```{r univariate, fig.width=3, fig.height=5}
  glmer_results= evaluatr.univariate(analysis)
  lapply(glmer_results,evaluatr.univariate.plot)
