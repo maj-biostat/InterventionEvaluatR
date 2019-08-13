@@ -120,6 +120,7 @@ doCausalImpact <-
            burnN,
            sampleN,
            trend = FALSE) {
+    debug.log("doCausalImpact #1")
     #Format outcome and covariates for regular and cross-validations
     if (crossval.stage) {
       #Data for cross-validation
@@ -958,6 +959,7 @@ weightSensitivityAnalysis <-
            year_def,
            burnN=2000,
            sampleN=8000) {
+    debug.log("weightSensitivityAnalysis #1")
     par(mar = c(5, 4, 1, 2) + 0.1)
     covar_df <- as.matrix(covars[[group]])
     #colnames(covar_df)<-substring(colnames(covar_df), 2)

@@ -134,9 +134,7 @@ evaluatr.init <- function(country,
       # Computation state
       data = list(),
       data.cv = list(),
-      ds = NA,
-      cluster = NA,
-      stopCluster = FALSE
+      ds = NA
     )
   )
   
@@ -237,32 +235,24 @@ evaluatr.init <- function(country,
 #' @importFrom HDInterval hdi
 #' @importFrom RcppRoll roll_sum
 #' @importFrom pogit poissonBvs
-#' @importFrom parallel makeCluster clusterEvalQ clusterExport stopCluster
 #' @importFrom future availableCores
-#' @importFrom pbapply pblapply
+#' @importFrom future.apply future_lapply
 #' @export
 
 evaluatr.impact = function(analysis, variants=names(analysis$.private$variants)) {
-    futureUpdate(analysis, future::future({
+  futureUpdate(analysis, future::future({
+    debug.log("evaluatr.impact #1")
     analysis$.private$progress_idx = 1
     analysis$.private$progress_count = length(analysis$.private$variants)
     evaluatr.impact.pre(analysis)
     results = list()
-    
-    #Start Cluster for CausalImpact (the main analysis function).
-    clusterEvalQ(cluster(analysis), {
-      library(pogit, quietly = TRUE)
-      library(lubridate, quietly = TRUE)
-    })
-    clusterExport(cluster(analysis), c('doCausalImpact'), environment())
     
     analysis$.private$variants = analysis$.private$variants[variants]
     
     for (variant in variants) {
       incrementProgressPart(analysis)
       results[[variant]]$groups <- setNames(
-        pblapply(
-          cl = cluster(analysis),
+        future_lapply(
           analysis$.private$data[[variant]],
           FUN = doCausalImpact,
           analysis$intervention_date,
@@ -277,7 +267,6 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
         analysis$groups
       )
     }
-    stopCluster(analysis)
     
     for (variant in intersect(c('full', 'time'), variants)) {
       #Save the inclusion probabilities from each of the models
@@ -573,16 +562,10 @@ evaluatr.crossval = function(analysis) {
   }
   
   #Run the models on each of these datasets
-  clusterEvalQ(cluster(analysis), {
-    library(pogit, quietly = TRUE)
-    library(lubridate, quietly = TRUE)
-  })
-  clusterExport(cluster(analysis), c('doCausalImpact'), environment())
   for (variant in names(analysis$.private$variants)) {
     incrementProgressPart(analysis)
     results[[variant]]$groups <- setNames(
-      pblapply(
-        cl = cluster(analysis),
+      future_lapply(
         analysis$.private$data.cv[[variant]],
         FUN = function(x)
           lapply(
@@ -600,7 +583,6 @@ evaluatr.crossval = function(analysis) {
       analysis$groups
     )
   }
-  stopCluster(analysis)
   
   ll.cv = list()
   
@@ -777,25 +759,10 @@ evaluatr.sensitivity = function(analysis) {
   
   if (length(sensitivity_groups) != 0) {
     #Weight Sensitivity Analysis - top weighted variables are excluded and analysis is re-run.
-    clusterEvalQ(cluster(analysis), {
-      library(pogit, quietly = TRUE)
-      library(lubridate, quietly = TRUE)
-      library(RcppRoll, quietly = TRUE)
-    })
-    clusterExport(
-      cluster(analysis),
-      c(
-        'sensitivity_ds',
-        'weightSensitivityAnalysis',
-        'sensitivity_groups'
-      ),
-      environment()
-    )
     incrementProgressPart(analysis)
     sensitivity_analysis_full <-
       setNames(
-        pblapply(
-          cl = cluster(analysis),
+        future_lapply(
           sensitivity_groups,
           FUN = weightSensitivityAnalysis,
           covars = sensitivity_covars_full,
@@ -811,7 +778,6 @@ evaluatr.sensitivity = function(analysis) {
         ),
         sensitivity_groups
       )
-    stopCluster(analysis)
     
     results$sensitivity_pred_quantiles <-
       lapply(
@@ -881,14 +847,6 @@ evaluatr.sensitivity = function(analysis) {
   
   analysis$results$sensitivity <- results
   return(results)
-}
-
-# Update a listenv using bindings from a listenv evaluated in a future
-# Used to outsource computation to a cluster and then fold the results into main R session
-futureUpdate = function(env, f) {
-  update = future::value(f)
-  env[names(update)] = update
-  env
 }
 
 #Formats the data
@@ -1115,24 +1073,17 @@ evaluatr.impact.pre = function(analysis, run.stl=TRUE) {
         
         glm.results <-
           vector("list", length = length(stl.data.setup)) #combine models into a list
-        clusterEvalQ(cluster(analysis), {
-          library(lme4, quietly = TRUE)
-        })
-        clusterExport(cluster(analysis),
-                      c('stl.data.setup', 'glm.fun', 'post.start.index'),
-                      environment())
         for (i in 1:length(stl.data.setup)) {
           incrementProgressPart(analysis)
           glm.results[[i]] <-
-            pblapply(
-              cl = cluster(analysis),
+            future_lapply(
               stl.data.setup[[i]],
               FUN = function(d) {
+                debug.log("evaluatr.impact.pre glm.fun")
                 glm.fun(d, post.start.index)
               }
             )
         }
-        stopCluster(analysis)
   }
   ######################
   
@@ -1216,15 +1167,17 @@ progressUpdate = function(analysis, description, completed=NA, total=NA) {
 evaluatr.univariate <- function(analysis) {
   progressUpdate(analysis, "Preparing analysis")
   futureUpdate(analysis, future::future({
+    debug.log("evaluatr.univariate #1")
     evaluatr.impact.pre(analysis,run.stl=FALSE) #formats the data
-    analysis
+    return(analysis)
   }))
   
   progressUpdate(analysis, "Performing univariate analysis")
   futureUpdate(analysis, future::future({
+    debug.log("evaluatr.univariate #2")
     #####
    # analysis$.private$data$full
-      results<-lapply( analysis$.private$data$full, single.var.glmer, 
+      results<-future_lapply( analysis$.private$data$full, single.var.glmer, 
                        n_seasons=analysis$n_seasons,
                       intro.date=analysis$post_period[1],
                       time_points=analysis[['time_points']],
@@ -1240,37 +1193,26 @@ evaluatr.univariate <- function(analysis) {
        summary.results[[i]]<-summary.results[[i]][order(-summary.results[[i]]$aic.wgt),]
       }
       analysis$results$univariate <- summary.results
-      analysis
+      return(analysis)
   }))
   progressUpdate(analysis, "Univariate analysis complete")
   return(analysis$results$univariate)
 }
-  
-cluster = function(analysis, cluster=NULL) {
-  
-  if (is.null(cluster)) {
-    # We are setting up our own cluster and need to stop it later
-    if (Sys.getenv("CI") != "") {
-      # If running on GitLab, default to multi-session cluster using all cores
-      n_cores <- availableCores(methods=c("system"))
-    } else {
-      # If running on someone's personal computer, default to multi-session cluster leaving one core free (if possible)
-      n_cores <- max(availableCores(methods=c("system")) - 1, 1)
-    }
-    analysis$.private$cluster = makeCluster(analysis$.private$n_cores)
-    analysis$.private$stopCluster = TRUE 
-  } else {
-    # We are using a cluster set up by someone else, and we'll leave it up to them to stop it
-    analysis$.private$cluster = cluster
-    analysis$.private$stopCluster = FALSE 
-  }
-  
-  analysis$.private$cluster
-}
 
-stopCluster = function(analysis) {
-  # Stop cluster only if we set it up
-  if (analysis$.private$stopCluster) {
-    parallel::stopCluster(analysis$.private$cluster)
+
+#' Construct an evaluation plan for the analysis. Use this with future::plan to control how InterventionEvaluatR uses multi-core and cluster computation resources
+#' @param analysis Analysis object, initialized by evaluatr.init.
+#' @return Future evaluation plan, suitable for passing to future::plan
+#' @importFrom future sequential multiprocess tweak plan
+#' @export
+evaluatr.plan = function(analysis) {
+  # The default plan is to evaluate top-level futures sequentially, and second-level futures concurrently. This is good for single-computer multi-core evaluation
+  if (Sys.getenv("CI") != "") {
+    # If running on GitLab, default to using all cores
+    n_cores <- availableCores(methods=c("system"))
+  } else {
+    # If not on GitLab (and therefore probably on a personal computer), default to leaving one core free (if possible)
+    n_cores <- max(availableCores(methods=c("system")) - 1, 1)
   }
+  plan(list(sequential, tweak(multiprocess, workers = n_cores)))
 }

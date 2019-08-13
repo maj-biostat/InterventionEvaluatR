@@ -9,8 +9,8 @@ Depends:
     R(>= 3.5.0)
 Imports: 
     plyr,
-    parallel,
     future,
+    future.apply,
     pomp,
     splines,
     MASS,
@@ -22,7 +22,6 @@ Imports:
     dummies,
     ggplot2,
     pogit,
-    pbapply,
     listenv,
     xtable,
     htmlTable,

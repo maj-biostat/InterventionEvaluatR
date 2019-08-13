@@ -111,6 +111,7 @@ analysis <- evaluatr.init(
   set.burnN=15000,
   set.sampleN=10000
 )
+evaluatr.plan(analysis)
 set.seed(1)
 ```
 
