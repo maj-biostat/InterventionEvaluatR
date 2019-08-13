@@ -134,8 +134,9 @@ evaluatr.init <- function(country,
       # Computation state
       data = list(),
       data.cv = list(),
-      n_cores = NA,
-      ds = NA
+      ds = NA,
+      cluster = NA,
+      stopCluster = FALSE
     )
   )
   
@@ -242,288 +243,291 @@ evaluatr.init <- function(country,
 #' @export
 
 evaluatr.impact = function(analysis, variants=names(analysis$.private$variants)) {
-  analysis$.private$progress_idx = 1
-  analysis$.private$progress_count = length(analysis$.private$variants)
-  evaluatr.impact.pre(analysis)
-  results = list()
-  
-  #Start Cluster for CausalImpact (the main analysis function).
-  cl <- makeCluster(analysis$.private$n_cores)
-  clusterEvalQ(cl, {
-    library(pogit, quietly = TRUE)
-    library(lubridate, quietly = TRUE)
-  })
-  clusterExport(cl, c('doCausalImpact'), environment())
-  
-  analysis$.private$variants = analysis$.private$variants[variants]
-  
-  for (variant in variants) {
-    incrementProgressPart(analysis)
-    results[[variant]]$groups <- setNames(
-      pblapply(
-        cl = cl,
-        analysis$.private$data[[variant]],
-        FUN = doCausalImpact,
-        analysis$intervention_date,
-        analysis$n_seasons,
-        var.select.on = analysis$.private$variants[[variant]]$var.select.on,
-        time_points = analysis$time_points,
-        trend = analysis$.private$variants[[variant]]$trend,
-        burnN=analysis$set.burnN,
-        sampleN=analysis$set.sampleN,
-        crossval.stage = FALSE
-      ),
-      analysis$groups
-    )
-  }
-  stopCluster(cl)
-  
-  for (variant in intersect(c('full', 'time'), variants)) {
-    #Save the inclusion probabilities from each of the models
-    results[[variant]]$inclusion_prob <-
-      setNames(lapply(results[[variant]]$groups, inclusionProb), analysis$groups)
-  }
-  
-  for (variant in variants) {
-    #All model results combined
-    results[[variant]]$quantiles <-
-      setNames(lapply(
-        analysis$groups,
-        FUN = function(group) {
-          rrPredQuantiles(
-            impact = results[[variant]]$groups[[group]],
-            denom_data = analysis$.private$ds[[group]][, analysis$denom_name],
-            eval_period = analysis$eval_period,
-            post_period = analysis$post_period,
-            year_def = analysis$year_def,
-            time_points = analysis$time_points,
-            n_seasons = analysis$n_seasons
-          )
-        }
-      ), analysis$groups)
-  }
-  
-  # Calculate best model
-  if ("full" %in% variants) {
-    analysis$model_size <-
-      sapply(results$full$groups, modelsize_func, n_seasons = analysis$n_seasons)
-  }
-  
-  if (all(c("full", "pca") %in% variants)) {
-    results$best$quantiles <-
-      vector("list", length(results$full$quantiles))
-    results$best$quantiles[analysis$model_size >= 1] <-
-      results$full$quantiles[analysis$model_size >= 1]
-    results$best$quantiles[analysis$model_size < 1] <-
-      results$pca$quantiles[analysis$model_size < 1]
-    results$best$quantiles <-
-      setNames(results$best$quantiles, analysis$groups)
-
-    results$best$variant <-
-      vector("list", length(results$full$quantiles))
-    results$best$variant[analysis$model_size >= 1] <- "full"
-    results$best$variant[analysis$model_size < 1] <- "pca"
-    results$best$variant <-
-      setNames(results$best$variant, analysis$groups)
-
-    variants = c("best", variants)
-  }
-  
-  for (variant in variants) {
-    # Predictions, aggregated by year
-    results[[variant]]$pred_quantiles <-
-      sapply(results[[variant]]$quantiles, getPred, simplify = 'array')
-    results[[variant]]$pred_quantiles_HDI <-
-      sapply(results[[variant]]$quantiles, getPredHDI, simplify = 'array')
-    results[[variant]]$ann_pred_quantiles <-
-      sapply(results[[variant]]$quantiles, getAnnPred, simplify = FALSE)
-    results[[variant]]$ann_pred_HDI <-
-      sapply(results[[variant]]$quantiles, getAnnPredHDI, simplify = FALSE)
-  }
-
-  for (variant in intersect(c('full', 'best'), variants)) {
-    # Pointwise RR and uncertainty for second stage meta variant
-    results[[variant]]$log_rr_quantiles <-
-      sapply(
-        results[[variant]]$quantiles,
-        FUN = function(quantiles) {
-          quantiles$log_rr_full_t_quantiles
-        },
-        simplify = 'array'
-      )
-    dimnames(results[[variant]]$log_rr_quantiles)[[1]] <-
-      analysis$time_points
-    results[[variant]]$log_rr_sd <-
-      sapply(
-        results[[variant]]$quantiles,
-        FUN = function(quantiles) {
-          quantiles$log_rr_full_t_sd
-        },
-        simplify = 'array'
-      )
+    futureUpdate(analysis, future::future({
+    analysis$.private$progress_idx = 1
+    analysis$.private$progress_count = length(analysis$.private$variants)
+    evaluatr.impact.pre(analysis)
+    results = list()
     
-    results[[variant]]$log_rr_hdi <-
-      sapply(
-        results[[variant]]$quantiles,
-        FUN = function(quantiles) {
-          quantiles$log_rr_full_t_hdi
-        },
-        simplify = 'array'
-      )
-    dimnames(results[[variant]]$log_rr_hdi)[[1]] <-
-      analysis$time_points
+    #Start Cluster for CausalImpact (the main analysis function).
+    clusterEvalQ(cluster(analysis), {
+      library(pogit, quietly = TRUE)
+      library(lubridate, quietly = TRUE)
+    })
+    clusterExport(cluster(analysis), c('doCausalImpact'), environment())
     
-    results[[variant]]$log_rr_full_t_samples.prec <-
-      sapply(
-        results[[variant]]$quantiles,
-        FUN = function(quantiles) {
-          quantiles$log_rr_full_t_samples.prec
-        },
-        simplify = 'array'
-      )
-  }
-  
-  for (variant in variants) {
-    # Rolling rate ratios
-    results[[variant]]$rr_roll <-
-      sapply(
-        results[[variant]]$quantiles,
-        FUN = function(quantiles) {
-          quantiles$roll_rr
-        },
-        simplify = 'array'
-      )
-    # Rate ratios for evaluation period.
-    results[[variant]]$rr_mean <-
-      t(sapply(results[[variant]]$quantiles, getRR))
-    results[[variant]]$rr_iter <-
-      t(sapply(results[[variant]]$quantiles, getRRiter))
-    results[[variant]]$rr_mean_hdi <-
-      t(sapply(results[[variant]]$quantiles, getRRHDI))
-  }
-  
-  if ('best' %in% variants) {
-    results$best$log_rr <- t(sapply(results$best$quantiles, getsdRR))
-  }
-  
-  for (variant in variants) {
-    results[[variant]]$rr_mean_intervals <-
-      setNames(
-        data.frame(
-          makeInterval(results[[variant]]$rr_mean[, 2], results[[variant]]$rr_mean[, 3], results[[variant]]$rr_mean[, 1]),
-          check.names = FALSE,
-          row.names = analysis$groups
+    analysis$.private$variants = analysis$.private$variants[variants]
+    
+    for (variant in variants) {
+      incrementProgressPart(analysis)
+      results[[variant]]$groups <- setNames(
+        pblapply(
+          cl = cluster(analysis),
+          analysis$.private$data[[variant]],
+          FUN = doCausalImpact,
+          analysis$intervention_date,
+          analysis$n_seasons,
+          var.select.on = analysis$.private$variants[[variant]]$var.select.on,
+          time_points = analysis$time_points,
+          trend = analysis$.private$variants[[variant]]$trend,
+          burnN=analysis$set.burnN,
+          sampleN=analysis$set.sampleN,
+          crossval.stage = FALSE
         ),
-        c(
-          paste(analysis$.private$variants[[variant]]$name, 'Estimate (95% CI)')
+        analysis$groups
+      )
+    }
+    stopCluster(analysis)
+    
+    for (variant in intersect(c('full', 'time'), variants)) {
+      #Save the inclusion probabilities from each of the models
+      results[[variant]]$inclusion_prob <-
+        setNames(lapply(results[[variant]]$groups, inclusionProb), analysis$groups)
+    }
+    
+    for (variant in variants) {
+      #All model results combined
+      results[[variant]]$quantiles <-
+        setNames(lapply(
+          analysis$groups,
+          FUN = function(group) {
+            rrPredQuantiles(
+              impact = results[[variant]]$groups[[group]],
+              denom_data = analysis$.private$ds[[group]][, analysis$denom_name],
+              eval_period = analysis$eval_period,
+              post_period = analysis$post_period,
+              year_def = analysis$year_def,
+              time_points = analysis$time_points,
+              n_seasons = analysis$n_seasons
+            )
+          }
+        ), analysis$groups)
+    }
+    
+    # Calculate best model
+    if ("full" %in% variants) {
+      analysis$model_size <-
+        sapply(results$full$groups, modelsize_func, n_seasons = analysis$n_seasons)
+    }
+    
+    if (all(c("full", "pca") %in% variants)) {
+      results$best$quantiles <-
+        vector("list", length(results$full$quantiles))
+      results$best$quantiles[analysis$model_size >= 1] <-
+        results$full$quantiles[analysis$model_size >= 1]
+      results$best$quantiles[analysis$model_size < 1] <-
+        results$pca$quantiles[analysis$model_size < 1]
+      results$best$quantiles <-
+        setNames(results$best$quantiles, analysis$groups)
+  
+      results$best$variant <-
+        vector("list", length(results$full$quantiles))
+      results$best$variant[analysis$model_size >= 1] <- "full"
+      results$best$variant[analysis$model_size < 1] <- "pca"
+      results$best$variant <-
+        setNames(results$best$variant, analysis$groups)
+  
+      variants = c("best", variants)
+    }
+    
+    for (variant in variants) {
+      # Predictions, aggregated by year
+      results[[variant]]$pred_quantiles <-
+        sapply(results[[variant]]$quantiles, getPred, simplify = 'array')
+      results[[variant]]$pred_quantiles_HDI <-
+        sapply(results[[variant]]$quantiles, getPredHDI, simplify = 'array')
+      results[[variant]]$ann_pred_quantiles <-
+        sapply(results[[variant]]$quantiles, getAnnPred, simplify = FALSE)
+      results[[variant]]$ann_pred_HDI <-
+        sapply(results[[variant]]$quantiles, getAnnPredHDI, simplify = FALSE)
+    }
+  
+    for (variant in intersect(c('full', 'best'), variants)) {
+      # Pointwise RR and uncertainty for second stage meta variant
+      results[[variant]]$log_rr_quantiles <-
+        sapply(
+          results[[variant]]$quantiles,
+          FUN = function(quantiles) {
+            quantiles$log_rr_full_t_quantiles
+          },
+          simplify = 'array'
+        )
+      dimnames(results[[variant]]$log_rr_quantiles)[[1]] <-
+        analysis$time_points
+      results[[variant]]$log_rr_sd <-
+        sapply(
+          results[[variant]]$quantiles,
+          FUN = function(quantiles) {
+            quantiles$log_rr_full_t_sd
+          },
+          simplify = 'array'
+        )
+      
+      results[[variant]]$log_rr_hdi <-
+        sapply(
+          results[[variant]]$quantiles,
+          FUN = function(quantiles) {
+            quantiles$log_rr_full_t_hdi
+          },
+          simplify = 'array'
+        )
+      dimnames(results[[variant]]$log_rr_hdi)[[1]] <-
+        analysis$time_points
+      
+      results[[variant]]$log_rr_full_t_samples.prec <-
+        sapply(
+          results[[variant]]$quantiles,
+          FUN = function(quantiles) {
+            quantiles$log_rr_full_t_samples.prec
+          },
+          simplify = 'array'
+        )
+    }
+    
+    for (variant in variants) {
+      # Rolling rate ratios
+      results[[variant]]$rr_roll <-
+        sapply(
+          results[[variant]]$quantiles,
+          FUN = function(quantiles) {
+            quantiles$roll_rr
+          },
+          simplify = 'array'
+        )
+      # Rate ratios for evaluation period.
+      results[[variant]]$rr_mean <-
+        t(sapply(results[[variant]]$quantiles, getRR))
+      results[[variant]]$rr_iter <-
+        t(sapply(results[[variant]]$quantiles, getRRiter))
+      results[[variant]]$rr_mean_hdi <-
+        t(sapply(results[[variant]]$quantiles, getRRHDI))
+    }
+    
+    if ('best' %in% variants) {
+      results$best$log_rr <- t(sapply(results$best$quantiles, getsdRR))
+    }
+    
+    for (variant in variants) {
+      results[[variant]]$rr_mean_intervals <-
+        setNames(
+          data.frame(
+            makeInterval(results[[variant]]$rr_mean[, 2], results[[variant]]$rr_mean[, 3], results[[variant]]$rr_mean[, 1]),
+            check.names = FALSE,
+            row.names = analysis$groups
+          ),
+          c(
+            paste(analysis$.private$variants[[variant]]$name, 'Estimate (95% CI)')
+          )
+        )
+    }
+    
+    if ('time' %in% variants) {
+      colnames(results$time$rr_mean) <-
+        paste('Time_trend', colnames(results$time$rr_mean))
+    }
+    
+    for (variant in variants) {
+      results[[variant]]$cumsum_prevented <-
+        sapply(
+          analysis$groups,
+          FUN = cumsum_func,
+          quantiles = results[[variant]]$quantiles,
+          outcome = analysis$outcome,
+          analysis$time_points,
+          analysis$post_period,
+          simplify = 'array'
+        )
+      results[[variant]]$cumsum_prevented_hdi <-
+        sapply(
+          analysis$groups,
+          FUN = cumsum_func,
+          quantiles = results[[variant]]$quantiles,
+          outcome = analysis$outcome,
+          analysis$time_points,
+          analysis$post_period,
+          hdi=T,
+          simplify = 'array'
+        )
+    }
+    
+    #Run a classic ITS analysis
+    rr.its1 <-
+      lapply(
+        analysis$.private$data$time,
+        its_func,
+        post_period = analysis$post_period,
+        eval_period = analysis$eval_period,
+        time_points = analysis$time_points
+      )
+    rr.t <- sapply(rr.its1, `[[`, "rr.q.t", simplify = 'array')
+    results$its = list()
+    results$its$rr_end <-
+      t(sapply(rr.its1, `[[`, "rr.q.post", simplify = 'array'))
+    results$its$rr_mean_intervals <-
+      data.frame(
+        'Classic ITS (95% CI)' = makeInterval(
+          results$its$rr_end[, 2],
+          results$its$rr_end[, 3],
+          results$its$rr_end[, 1]
+        ),
+        check.names = FALSE,
+        row.names = analysis$groups
+      )
+  
+    #Combine RRs into 1 for ease of plotting
+    results$rr_mean_combo <- 
+      do.call(rbind, lapply(seq_along(names(analysis$.private$variants)), function(idx) {
+        variant = names(analysis$.private$variants)[[idx]]
+        setNames(
+          cbind(data.frame(
+            Model=rep(idx, nrow(results[[variant]]$rr_mean)),
+            Model_tag=rep(variant, nrow(results[[variant]]$rr_mean)),
+            groups=analysis$groups,
+            group.index=seq(
+              from = 1,
+              by = 1,
+              length.out = nrow(results[[variant]]$rr_mean)
+            )
+          ), results[[variant]]$rr_mean), 
+          c('Model', 'Model_tag', 'groups', 'group.index', 'lcl', 'mean.rr', 'ucl')
+        )
+      }))
+  
+    results$point.weights <-
+      as.data.frame(matrix(rep(1, nrow(
+        results$rr_mean_combo
+      )), ncol = 1))
+    names(results$point.weights) <- 'value'
+    
+    results$rr_mean_combo$group.index <-
+      as.numeric(as.character(results$rr_mean_combo$group.index))
+    results$rr_mean_combo$mean.rr <-
+      as.numeric(as.character(results$rr_mean_combo$mean.rr))
+    results$rr_mean_combo$lcl <-
+      as.numeric(as.character(results$rr_mean_combo$lcl))
+    results$rr_mean_combo$ucl <-
+      as.numeric(as.character(results$rr_mean_combo$ucl))
+    results$rr_mean_combo$group.index <- results$rr_mean_combo$group.index + (results$rr_mean_combo$Model - 1) * 0.15 # <-- TODO I suspect this is a kludge for plotting and should probably not be here at all
+    results$rr_mean_combo$Model <- as.factor(unlist(lapply(analysis$.private$variants[results$rr_mean_combo$Model_tag], function(variant) variant$name)))
+    results$rr_mean_combo$est.index <-
+      as.factor(1:nrow(results$rr_mean_combo))
+    #Fix order for axis
+    results$rr_mean_combo$Model <-
+      factor(
+        results$rr_mean_combo$Model,
+        lapply(
+          analysis$.private$variants[c('time', 'time_no_offset', 'pca', 'full')], 
+          function(variant) variant$name
         )
       )
-  }
+    #print(levels(rr_mean_combo$Model))
+    
+    
+    analysis$results$impact <- results
+    return(analysis)
+  }))
   
-  if ('time' %in% variants) {
-    colnames(results$time$rr_mean) <-
-      paste('Time_trend', colnames(results$time$rr_mean))
-  }
-  
-  for (variant in variants) {
-    results[[variant]]$cumsum_prevented <-
-      sapply(
-        analysis$groups,
-        FUN = cumsum_func,
-        quantiles = results[[variant]]$quantiles,
-        outcome = analysis$outcome,
-        analysis$time_points,
-        analysis$post_period,
-        simplify = 'array'
-      )
-    results[[variant]]$cumsum_prevented_hdi <-
-      sapply(
-        analysis$groups,
-        FUN = cumsum_func,
-        quantiles = results[[variant]]$quantiles,
-        outcome = analysis$outcome,
-        analysis$time_points,
-        analysis$post_period,
-        hdi=T,
-        simplify = 'array'
-      )
-  }
-  
-  #Run a classic ITS analysis
-  rr.its1 <-
-    lapply(
-      analysis$.private$data$time,
-      its_func,
-      post_period = analysis$post_period,
-      eval_period = analysis$eval_period,
-      time_points = analysis$time_points
-    )
-  rr.t <- sapply(rr.its1, `[[`, "rr.q.t", simplify = 'array')
-  results$its = list()
-  results$its$rr_end <-
-    t(sapply(rr.its1, `[[`, "rr.q.post", simplify = 'array'))
-  results$its$rr_mean_intervals <-
-    data.frame(
-      'Classic ITS (95% CI)' = makeInterval(
-        results$its$rr_end[, 2],
-        results$its$rr_end[, 3],
-        results$its$rr_end[, 1]
-      ),
-      check.names = FALSE,
-      row.names = analysis$groups
-    )
-
-  #Combine RRs into 1 for ease of plotting
-  results$rr_mean_combo <- 
-    do.call(rbind, lapply(seq_along(names(analysis$.private$variants)), function(idx) {
-      variant = names(analysis$.private$variants)[[idx]]
-      setNames(
-        cbind(data.frame(
-          Model=rep(idx, nrow(results[[variant]]$rr_mean)),
-          Model_tag=rep(variant, nrow(results[[variant]]$rr_mean)),
-          groups=analysis$groups,
-          group.index=seq(
-            from = 1,
-            by = 1,
-            length.out = nrow(results[[variant]]$rr_mean)
-          )
-        ), results[[variant]]$rr_mean), 
-        c('Model', 'Model_tag', 'groups', 'group.index', 'lcl', 'mean.rr', 'ucl')
-      )
-    }))
-
-  results$point.weights <-
-    as.data.frame(matrix(rep(1, nrow(
-      results$rr_mean_combo
-    )), ncol = 1))
-  names(results$point.weights) <- 'value'
-  
-  results$rr_mean_combo$group.index <-
-    as.numeric(as.character(results$rr_mean_combo$group.index))
-  results$rr_mean_combo$mean.rr <-
-    as.numeric(as.character(results$rr_mean_combo$mean.rr))
-  results$rr_mean_combo$lcl <-
-    as.numeric(as.character(results$rr_mean_combo$lcl))
-  results$rr_mean_combo$ucl <-
-    as.numeric(as.character(results$rr_mean_combo$ucl))
-  results$rr_mean_combo$group.index <- results$rr_mean_combo$group.index + (results$rr_mean_combo$Model - 1) * 0.15 # <-- TODO I suspect this is a kludge for plotting and should probably not be here at all
-  results$rr_mean_combo$Model <- as.factor(unlist(lapply(analysis$.private$variants[results$rr_mean_combo$Model_tag], function(variant) variant$name)))
-  results$rr_mean_combo$est.index <-
-    as.factor(1:nrow(results$rr_mean_combo))
-  #Fix order for axis
-  results$rr_mean_combo$Model <-
-    factor(
-      results$rr_mean_combo$Model,
-      lapply(
-        analysis$.private$variants[c('time', 'time_no_offset', 'pca', 'full')], 
-        function(variant) variant$name
-      )
-    )
-  #print(levels(rr_mean_combo$Model))
-  
-  
-  analysis$results$impact <- results
-  return(results)
+  return(analysis$results$impact)
 }
 
 #' Perform cross-validation
@@ -569,18 +573,16 @@ evaluatr.crossval = function(analysis) {
   }
   
   #Run the models on each of these datasets
-  cl <- makeCluster(analysis$.private$n_cores)
-  clusterEvalQ(cl, {
+  clusterEvalQ(cluster(analysis), {
     library(pogit, quietly = TRUE)
-    
     library(lubridate, quietly = TRUE)
   })
-  clusterExport(cl, c('doCausalImpact'), environment())
+  clusterExport(cluster(analysis), c('doCausalImpact'), environment())
   for (variant in names(analysis$.private$variants)) {
     incrementProgressPart(analysis)
     results[[variant]]$groups <- setNames(
       pblapply(
-        cl = cl,
+        cl = cluster(analysis),
         analysis$.private$data.cv[[variant]],
         FUN = function(x)
           lapply(
@@ -598,7 +600,7 @@ evaluatr.crossval = function(analysis) {
       analysis$groups
     )
   }
-  stopCluster(cl)
+  stopCluster(analysis)
   
   ll.cv = list()
   
@@ -775,14 +777,13 @@ evaluatr.sensitivity = function(analysis) {
   
   if (length(sensitivity_groups) != 0) {
     #Weight Sensitivity Analysis - top weighted variables are excluded and analysis is re-run.
-    cl <- makeCluster(analysis$.private$n_cores)
-    clusterEvalQ(cl, {
+    clusterEvalQ(cluster(analysis), {
       library(pogit, quietly = TRUE)
       library(lubridate, quietly = TRUE)
       library(RcppRoll, quietly = TRUE)
     })
     clusterExport(
-      cl,
+      cluster(analysis),
       c(
         'sensitivity_ds',
         'weightSensitivityAnalysis',
@@ -794,7 +795,7 @@ evaluatr.sensitivity = function(analysis) {
     sensitivity_analysis_full <-
       setNames(
         pblapply(
-          cl = cl,
+          cl = cluster(analysis),
           sensitivity_groups,
           FUN = weightSensitivityAnalysis,
           covars = sensitivity_covars_full,
@@ -810,7 +811,7 @@ evaluatr.sensitivity = function(analysis) {
         ),
         sensitivity_groups
       )
-    stopCluster(cl)
+    stopCluster(analysis)
     
     results$sensitivity_pred_quantiles <-
       lapply(
@@ -882,6 +883,13 @@ evaluatr.sensitivity = function(analysis) {
   return(results)
 }
 
+# Update a listenv using bindings from a listenv evaluated in a future
+# Used to outsource computation to a cluster and then fold the results into main R session
+futureUpdate = function(env, f) {
+  update = future::value(f)
+  env[names(update)] = update
+  env
+}
 
 #Formats the data
 #' @importFrom plyr rbind.fill arrange
@@ -1104,32 +1112,27 @@ evaluatr.impact.pre = function(analysis, run.stl=TRUE) {
         
         ##SECTION 2: run first stage models for STL
         analysis$.private$progress_count = analysis$.private$progress_count + length(stl.data.setup)
-        if (Sys.getenv("CI") != "") {
-          analysis$.private$n_cores <- availableCores(methods=c("system"))
-        } else {
-              analysis$.private$n_cores <- max(availableCores(methods=c("system")) - 1, 1)
-        }
+        
         glm.results <-
           vector("list", length = length(stl.data.setup)) #combine models into a list
-        cl <- makeCluster(analysis$.private$n_cores)
-        clusterEvalQ(cl, {
+        clusterEvalQ(cluster(analysis), {
           library(lme4, quietly = TRUE)
         })
-        clusterExport(cl,
+        clusterExport(cluster(analysis),
                       c('stl.data.setup', 'glm.fun', 'post.start.index'),
                       environment())
         for (i in 1:length(stl.data.setup)) {
           incrementProgressPart(analysis)
           glm.results[[i]] <-
             pblapply(
-              cl = cl,
+              cl = cluster(analysis),
               stl.data.setup[[i]],
               FUN = function(d) {
                 glm.fun(d, post.start.index)
               }
             )
         }
-        stopCluster(cl)
+        stopCluster(analysis)
   }
   ######################
   
@@ -1191,6 +1194,10 @@ incrementProgressPart <- function(analysis) {
   analysis$.private$progress_idx = analysis$.private$progress_idx + 1
 }
 
+progressUpdate = function(analysis, description, completed=NA, total=NA) {
+  write(sprintf("Progress: %s", description), stdout())
+}
+
 #' Perform analysis controling for 1 variable at a time
 #' @param analysis Analysis object, initialized by TODO.init.
 #' @return Univariate analysis results, `results`, as described below
@@ -1207,27 +1214,63 @@ incrementProgressPart <- function(analysis) {
 #'
 #' @export
 evaluatr.univariate <- function(analysis) {
-  evaluatr.impact.pre(analysis,run.stl=FALSE) #formats the data
-      #####
- # analysis$.private$data$full
-    results<-lapply( analysis$.private$data$full, single.var.glmer, 
-                     n_seasons=analysis$n_seasons,
-                    intro.date=analysis$post_period[1],
-                    time_points=analysis[['time_points']],
-                    eval.period=analysis$eval_period)  
-    univariate.aic <- lapply(results, '[[','aic.summary')
-    covar.names <- lapply(results, '[[','covar.names')
-    aic.weights<- lapply(univariate.aic, function(x) exp(-0.5*(x-min(x)))/sum(exp(-0.5*(x-min(x)))) )
-    rr.post <- lapply(results, '[[','rr.post')
-    summary.results<- vector("list", length(rr.post)) 
-    for(i in 1:length(rr.post)){
-      summary.results[[i]]<-cbind.data.frame(rr.post[[i]],round(aic.weights[[i]],3),covar.names[[i]])
-     names(summary.results[[i]])<-c('rr.lcl','rr','rr.ucl','aic.wgt','covar')
-     summary.results[[i]]<-summary.results[[i]][order(-summary.results[[i]]$aic.wgt),]
+  progressUpdate(analysis, "Preparing analysis")
+  futureUpdate(analysis, future::future({
+    evaluatr.impact.pre(analysis,run.stl=FALSE) #formats the data
+    analysis
+  }))
+  
+  progressUpdate(analysis, "Performing univariate analysis")
+  futureUpdate(analysis, future::future({
+    #####
+   # analysis$.private$data$full
+      results<-lapply( analysis$.private$data$full, single.var.glmer, 
+                       n_seasons=analysis$n_seasons,
+                      intro.date=analysis$post_period[1],
+                      time_points=analysis[['time_points']],
+                      eval.period=analysis$eval_period)  
+      univariate.aic <- lapply(results, '[[','aic.summary')
+      covar.names <- lapply(results, '[[','covar.names')
+      aic.weights<- lapply(univariate.aic, function(x) exp(-0.5*(x-min(x)))/sum(exp(-0.5*(x-min(x)))) )
+      rr.post <- lapply(results, '[[','rr.post')
+      summary.results<- vector("list", length(rr.post)) 
+      for(i in 1:length(rr.post)){
+        summary.results[[i]]<-cbind.data.frame(rr.post[[i]],round(aic.weights[[i]],3),covar.names[[i]])
+       names(summary.results[[i]])<-c('rr.lcl','rr','rr.ucl','aic.wgt','covar')
+       summary.results[[i]]<-summary.results[[i]][order(-summary.results[[i]]$aic.wgt),]
+      }
+      analysis$results$univariate <- summary.results
+      analysis
+  }))
+  progressUpdate(analysis, "Univariate analysis complete")
+  return(analysis$results$univariate)
+}
+  
+cluster = function(analysis, cluster=NULL) {
+  
+  if (is.null(cluster)) {
+    # We are setting up our own cluster and need to stop it later
+    if (Sys.getenv("CI") != "") {
+      # If running on GitLab, default to multi-session cluster using all cores
+      n_cores <- availableCores(methods=c("system"))
+    } else {
+      # If running on someone's personal computer, default to multi-session cluster leaving one core free (if possible)
+      n_cores <- max(availableCores(methods=c("system")) - 1, 1)
     }
-    summary.results
-    analysis$results$univariate<-summary.results
-    return(summary.results)
+    analysis$.private$cluster = makeCluster(analysis$.private$n_cores)
+    analysis$.private$stopCluster = TRUE 
+  } else {
+    # We are using a cluster set up by someone else, and we'll leave it up to them to stop it
+    analysis$.private$cluster = cluster
+    analysis$.private$stopCluster = FALSE 
   }
   
+  analysis$.private$cluster
+}
 
+stopCluster = function(analysis) {
+  # Stop cluster only if we set it up
+  if (analysis$.private$stopCluster) {
+    parallel::stopCluster(analysis$.private$cluster)
+  }
+}
