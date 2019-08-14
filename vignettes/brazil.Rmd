@@ -95,7 +95,6 @@ analysis <- evaluatr.init(
   outcome_name = "J12_18", #Outcome variable name
   denom_name = "ach_noj" #Denominator variable name
 )
-evaluatr.plan(analysis)
 set.seed(1)
 ```
 
