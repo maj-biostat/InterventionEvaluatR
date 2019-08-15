@@ -25,7 +25,8 @@ Imports:
     listenv,
     xtable,
     htmlTable,
-    HDInterval
+    HDInterval,
+	progress
 Suggests: 
     knitr,
     rmarkdown
