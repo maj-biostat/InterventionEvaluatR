@@ -214,6 +214,7 @@ evaluatr.init <- function(country,
 #' @param plan.user If FALSE (default), InterventionEvaluatR will set up futures execution plan (future::plan). If TRUE, the user of InterventionEvaluatR is responsible for setting up the execution plan.
 #' @param progress Progress reporting function(message, completed, total). If NULL, the default function will be used, which prints progress updates to the console
 #' @importFrom future sequential multisession tweak plan
+#' @export
 evaluatr.config = function(analysis, plan.user=FALSE, progress=NULL) {
   if (!plan.user) {
     # The default plan is to evaluate top-level futures sequentially, and second-level futures concurrently. This is good for single-computer multi-core evaluation
