@@ -47,7 +47,7 @@ check-release:
     - docker-mem:4 # True story: R cmd check fails if you use more than 2 CPUs
   stage: check
   script:
-    - Rscript -e "devtools::check_built(path = paste0('${R_BUILD_DIR}/', list.files('${R_BUILD_DIR}', pattern='InterventionEvaluatR.*t.*gz')[1]))"
+    - Rscript -e "devtools::check_built(path = paste0('${R_BUILD_DIR}/', list.files('${R_BUILD_DIR}', pattern='InterventionEvaluatR.*t.*gz')[1]), args='--no-build-vignettes')"
     
 pages:
   extends: .use-autodocker
