@@ -210,6 +210,7 @@ evaluatr.init <- function(country,
 
 #' Configure various aspects of how analysis is performed (such as use of multiple cores and progress reporting)
 #' 
+#' @param analysis Analysis object returned by evaluatr.init
 #' @param plan.user If FALSE (default), InterventionEvaluatR will set up futures execution plan (future::plan). If TRUE, the user of InterventionEvaluatR is responsible for setting up the execution plan.
 #' @param progress Progress reporting function(message, completed, total). If NULL, the default function will be used, which prints progress updates to the console
 #' @importFrom future sequential multisession tweak plan

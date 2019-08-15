@@ -7,6 +7,8 @@
 evaluatr.config(analysis, plan.user = FALSE, progress = NULL)
 }
 \arguments{
+\item{analysis}{Analysis object returned by evaluatr.init}
+
 \item{plan.user}{If FALSE (default), InterventionEvaluatR will set up futures execution plan (future::plan). If TRUE, the user of InterventionEvaluatR is responsible for setting up the execution plan.}
 
 \item{progress}{Progress reporting function(message, completed, total). If NULL, the default function will be used, which prints progress updates to the console}
