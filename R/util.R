@@ -12,7 +12,6 @@ futureUpdate = function(env, f) {
 
 #' @importFrom progress progress_bar
 progressDefault = function(analysis) {
-  progressBar = list()
   list(
     step = function(message) {
       analysis$.private$progressBar = progress_bar$new(format=sprintf("%s [:bar] :percent", message), total=100, clear=FALSE, show_after=0)
