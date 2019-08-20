@@ -81,9 +81,19 @@ makeCovars <-
     #            1,
     #            ifelse(time_points == '2009-09-01', 1, 0))
     # }
+    dates<-unique(ds_group[,analysis$date_name])
+    index<-1:length(dates)
+    post.start.index<-which(dates==analysis$post_period[1])
+    post.index<- index-post.start.index
+    post.index[post.index<0]<-0
+    post.index3<- post.index
+    post.index3[post.index3>=24]<-24 #force spline to level out
+    spls.time<-as.data.frame(bs(post.index3, degree=2))
+    names(spls.time)<-c('spl1','spl2')
+    
     covars <-
       as.data.frame(lapply(covars[, apply(covars, 2, var) != 0, drop = FALSE], scale), check.names = FALSE)
-    covars <- cbind(season.dummies, covars)
+    covars <- cbind(season.dummies, spls.time, covars)
     return(covars)
   }
 
@@ -165,20 +175,19 @@ doCausalImpact <-
       as.vector(post_period_response[time_points >= as.Date(intervention_date)])
     
     covars <- x
-    cID <- seq_along(y.pre) #used for observation-level random effect
+    cID <- seq_along(y.full) #used for observation-level random effect
     
     #Which variables are fixed in the analysis (not estimated)
     if (trend) {
       deltafix.mod <-
-        c(rep(1, times = (ncol(x.pre) - 1)), 0) #monthly dummies, offset, fixed
+        c(rep(1, times = (ncol(x.pre) - 1+2)), 0) #monthly dummies, offset, splines fixed
       bsts_model.pois  <-
         poissonBvs(
-          y = y.pre ,
-          X = x.pre,
-          offset = offset.t.pre,
-          BVS = var.select.on,
+          y = y.full ,
+          X = x,
+          offset = offset.t,
+          BVS = F,
           model = list(
-            deltafix = deltafix.mod,
             ri = ri.select,
             clusterID = cID
           ),
@@ -188,13 +197,12 @@ doCausalImpact <-
           )
         )
     } else{
-      if (var.select.on) {
-        deltafix.mod <- rep(0, times = (ncol(x.pre)))
-        deltafix.mod[1:(n_seasons - 1)] <- 1 #fix  monthly dummies
+        deltafix.mod <- rep(0, times = (ncol(x)))
+        deltafix.mod[1:(n_seasons - 1 +2)] <- 1 #fix  monthly dummies, splines
         bsts_model.pois  <-
           poissonBvs(
-            y = y.pre ,
-            X = x.pre,
+            y = y.full ,
+            X = x,
             BVS = TRUE,
             model = list(
               deltafix = deltafix.mod,
@@ -207,34 +215,14 @@ doCausalImpact <-
               
             )
           )
-      } else{
-        if (ri.select) {
-          bsts_model.pois  <-
-            poissonBvs(
-              y = y.pre ,
-              X = x.pre,
-              BVS = FALSE,
-              model = list(ri = TRUE, clusterID = cID),
-              mcmc=list(
-                burnin=burnN,
-                M=sampleN
-                
-              )
-            )
-        } else{
-          bsts_model.pois  <- poissonBvs(y = y.pre , X = x.pre, BVS = FALSE,
-                                         mcmc=list(
-                                           burnin=burnN,
-                                           M=sampleN
-                                           
-                                         ))
-        }
-      }
-    }
+      } 
+      
     
     beta.mat <- bsts_model.pois$samplesP$beta[-c(1:burnN), ]
     x.fit <- cbind(rep(1, nrow(x)), x)
-    x.fit.pre<- x.fit[time_points < as.Date(intervention_date),]
+    x.fit.counterfact <- x.fit
+    x.fit.counterfact[,c('spl1','spl2')]<-0
+    
     rand.int.fitted <- bsts_model.pois$samplesP$bi[-c(1:burnN), ]
 
     #Generate  predictions with prediction interval
@@ -254,34 +242,32 @@ doCausalImpact <-
     }
     if (trend) {
       reg.mean <-   exp((x.fit %*% t(beta.mat)) + disp.mat)  * offset.t
+      reg.mean.counter <-   exp((x.fit.counterfact %*% t(beta.mat)) + disp.mat)  * offset.t
       offset.t.pre<-offset.t[time_points < as.Date(intervention_date)]
-      reg.mean.fitted<-exp((x.fit.pre %*% t(beta.mat)) + t(rand.int.fitted))  * offset.t.pre
+      reg.mean.fitted<-exp((x.fit %*% t(beta.mat)) + t(rand.int.fitted))  * offset.t
     } else{
       reg.mean <-   exp((x.fit %*% t(beta.mat)) + disp.mat)
-      reg.mean.fitted<- exp((x.fit.pre %*% t(beta.mat)) + t(rand.int.fitted) )
-        }
+      reg.mean.counter <-   exp((x.fit.counterfact %*% t(beta.mat)) + disp.mat)  
+      reg.mean.fitted<- exp((x.fit %*% t(beta.mat)) + t(rand.int.fitted) )
+     }
     predict.bsts <- rpois(length(reg.mean), lambda = reg.mean)
     predict.bsts <-
       matrix(predict.bsts,
              nrow = nrow(reg.mean),
              ncol = ncol(reg.mean))
-    #predict.bsts.q<-t(apply(predict.bsts,1,quantile, probs=c(0.025,0.5,0.975)))
-    #matplot(predict.bsts.q, type='l', col=c('gray','black','gray'), lty=c(2,1,2), bty='l', ylab="N hospitalizations")
-    #points(y.full)
-    
-    
+
     #DIC
     pred.count<-reg.mean.fitted #lambda
     pred.count.mean<-apply(pred.count,1,mean)
     log.like.func<-function(x1){
-    neg_two_loglike_poisson<- -2*sum(dpois(as.vector(y.pre), 
+    neg_two_loglike_poisson<- -2*sum(dpois(as.vector(y.full), 
                                              lambda = x1, 
                                              log = TRUE))
     }
     log.lik.mat<-apply(pred.count,2,log.like.func) #Object of length D, with -2LL estimates
       #Calculate the mean of the fitted values. Prd.count mean, is a vector of length N,
     #And use this to calculate neg_two_loglike_poisson_mean
-    neg_two_loglike_poisson_mean<- -2*sum(dpois(as.vector(y.pre),
+    neg_two_loglike_poisson_mean<- -2*sum(dpois(as.vector(y.full),
                                                 lambda = pred.count.mean,
                                                 log = TRUE))
     DIC<- 2*(mean(log.lik.mat)) -   neg_two_loglike_poisson_mean
@@ -291,7 +277,7 @@ doCausalImpact <-
     incl.probs.mat <- t(bsts_model.pois$samplesP$pdeltaBeta[-c(1:burnN), ])
     inclusion_probs <- apply(incl.probs.mat, 1, mean)
     summary.pois <- summary(bsts_model.pois)
-    covar.names <- dimnames(x.pre)[[2]]
+    covar.names <- dimnames(x)[[2]]
     if (ri.select) {
       rand.eff <- bsts_model.pois$samplesP$bi[-c(1:burnN), ]
     } else{
@@ -302,6 +288,7 @@ doCausalImpact <-
       impact <-
         list(
           reg.mean,
+          reg.mean.counter,
           exclude.indices,
           rand.eff,
           offset.t,
@@ -317,9 +304,10 @@ doCausalImpact <-
       names(impact) <-
         c(
           'reg.mean',
+          'reg.mean.counter',
           'exclude.indices',
           'rand.eff',
-          'offset.t.pre',
+          'offset.t',
           'covars',
           'beta.mat',
           'predict.bsts',
@@ -333,6 +321,7 @@ doCausalImpact <-
       impact <-
         list(
           reg.mean,
+          reg.mean.counter,
           exclude.indices,
           rand.eff,
           covars,
@@ -347,6 +336,7 @@ doCausalImpact <-
       names(impact) <-
         c(
           'reg.mean',
+          'reg.mean.counter',
           'exclude.indices' ,
           'rand.eff',
           'covars',
@@ -524,7 +514,10 @@ rrPredQuantiles <-
            year_def,
            time_points) {
     pred_samples <- impact$predict.bsts
+    fitted_samples <- impact$reg.mean
+    counter_samples <- impact$reg.mean.counter
     
+        
     pred <-
       t(apply(
         pred_samples,
@@ -533,13 +526,31 @@ rrPredQuantiles <-
         probs = c(0.025, 0.5, 0.975),
         na.rm = TRUE
       ))
+    fitted<-
+      t(apply(
+        fitted_samples,
+        1,
+        quantile,
+        probs = c(0.025, 0.5, 0.975),
+        na.rm = TRUE
+      ))
+    counter<-
+      t(apply(
+        counter_samples,
+        1,
+        quantile,
+        probs = c(0.025, 0.5, 0.975),
+        na.rm = TRUE
+      ))    
     pred.hdi <- cbind( pred[,'50%'],t(hdi(t(pred_samples), credMass = 0.95)) )
       
     eval_indices <-
       match(which(time_points == eval_period[1]), (1:length(impact$observed.y))):match(which(time_points ==
-                                                                                               eval_period[2]), (1:length(impact$observed.y)))
+                                                                                        eval_period[2]), (1:length(impact$observed.y)))
     
     pred_eval_sum <- colSums(pred_samples[eval_indices,])
+    fitted_eval_sum<-colSums(fitted_samples[eval_indices,])
+    counter_eval_sum<-colSums(counter_samples[eval_indices,])
     
     eval_obs <- sum(impact$observed.y[eval_indices])
     
@@ -594,7 +605,7 @@ rrPredQuantiles <-
     # points(unique(year),pred.yr.sum.q$obs, pch=16)
     # abline(v=year(intervention_date )+0.5, col='gray', lty=2)
     
-    eval_rr_sum <- eval_obs / pred_eval_sum
+    eval_rr_sum <- fitted_eval_sum / counter_eval_sum
     rr.iter<-eval_rr_sum
     rr <-
       quantile(eval_rr_sum,
@@ -605,36 +616,7 @@ rrPredQuantiles <-
     mean_rr <- mean(eval_rr_sum)
     sd_log_rr <- sd(log(eval_rr_sum))
     
-    #Calculate RR for the N months prior to vaccine introduction as a bias corrrection factor
-    pre_indices <-
-      which(time_points == (eval_period[1] %m+% months(12))):which(time_points ==
-                                                                     (eval_period[1] %m+% months(1)))
-    pred_pre_sum <- colSums(pred_samples[pre_indices,])
-    pre_obs <- sum(impact$observed.y[pre_indices])
-    rr_sum_pre <- pre_obs / pred_pre_sum  #Should be 0!
-    
-    #unbias_rr <- eval_rr_sum / rr_sum_pre # same as log_rr - log_rr_pre=log(A/B)
-    #unbias_rr_q <- quantile(unbias_rr, probs = c(0.025, 0.5, 0.975))
-    
-    plot_rr_start <- which(time_points == post_period[1]) - n_seasons
-    roll_rr_indices <-
-      match(plot_rr_start, (1:length(impact$observed.y))):match(which(time_points ==
-                                                                        eval_period[2]), (1:length(impact$observed.y)))
-    
     obs_full <- impact$observed.y
-    
-    roll_sum_pred <-
-      roll_sum(pred_samples[roll_rr_indices,], n_seasons)
-    roll_sum_obs <- roll_sum(obs_full[roll_rr_indices], n_seasons)
-    roll_rr_est <- roll_sum_obs / roll_sum_pred
-    roll_rr <-
-      t(apply(
-        roll_rr_est,
-        1,
-        quantile,
-        probs = c(0.025, 0.5, 0.975),
-        na.rm = TRUE
-      ))
     
     pred_samples_post <- pred_samples[eval_indices,]
     
@@ -642,7 +624,7 @@ rrPredQuantiles <-
     #  pred_quantiles<-t(apply(pred_samples, 1, quantile, probs = c(0.025, 0.5, 0.975), na.rm = TRUE))
     #  matplot(impact$observed.y/pred_quantiles, type='l')
     log_rr_full_t_samples <-
-      t(log((obs_full + 0.5) / (pred_samples + 0.5))) #Continuity correction for 0s
+      t(log(fitted_samples / counter_samples)) 
     log_rr_full_t_quantiles <-
       t(apply(
         log_rr_full_t_samples,
@@ -675,15 +657,14 @@ rrPredQuantiles <-
         pred.yr.sum.q = pred.yr.sum.q,
        # log_rr_full_t_samples.prec.post = log_rr_full_t_samples.prec.post,
         pred_samples = pred_samples,
+        fitted_samples=fitted_samples,
+        counter_samples=counter_samples,
         pred = pred,
         rr = rr,
-        roll_rr = roll_rr,
         mean_rr = mean_rr,
         pred_samples_post_full = pred_samples_post,
-        roll_rr = roll_rr,
         log_rr_full_t_quantiles = log_rr_full_t_quantiles,
         log_rr_full_t_sd = log_rr_full_t_sd,
-        rr = rr,
         rr.iter=rr.iter
       )
     return(quantiles)

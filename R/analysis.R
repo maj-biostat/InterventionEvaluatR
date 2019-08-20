@@ -115,18 +115,8 @@ evaluatr.init <- function(country,
           var.select.on = FALSE,
           trend = TRUE,
           name = "Time trend"
-        ),
-        time_no_offset = list(
-          var.select.on = FALSE,
-          trend = FALSE,
-          name = "Time trend (no offset)"
-        ),
-        pca = list(
-          var.select.on = FALSE,
-          trend = FALSE,
-          name = "STL+PCA"
         )
-      ),
+       ),
       
       exclude_covar = NA,
       exclude_group = NA,
@@ -310,25 +300,6 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
       sapply(results$full$groups, modelsize_func, n_seasons = analysis$n_seasons)
   }
   
-  if (all(c("full", "pca") %in% variants)) {
-    results$best$quantiles <-
-      vector("list", length(results$full$quantiles))
-    results$best$quantiles[analysis$model_size >= 1] <-
-      results$full$quantiles[analysis$model_size >= 1]
-    results$best$quantiles[analysis$model_size < 1] <-
-      results$pca$quantiles[analysis$model_size < 1]
-    results$best$quantiles <-
-      setNames(results$best$quantiles, analysis$groups)
-
-    results$best$variant <-
-      vector("list", length(results$full$quantiles))
-    results$best$variant[analysis$model_size >= 1] <- "full"
-    results$best$variant[analysis$model_size < 1] <- "pca"
-    results$best$variant <-
-      setNames(results$best$variant, analysis$groups)
-
-    variants = c("best", variants)
-  }
   
   for (variant in variants) {
     # Predictions, aggregated by year
@@ -342,7 +313,7 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
       sapply(results[[variant]]$quantiles, getAnnPredHDI, simplify = FALSE)
   }
 
-  for (variant in intersect(c('full', 'best'), variants)) {
+  for (variant in intersect(c('full', 'full'), variants)) {
     # Pointwise RR and uncertainty for second stage meta variant
     results[[variant]]$log_rr_quantiles <-
       sapply(
@@ -417,10 +388,6 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
     }
       results[[variant]]$converge<-con.stat 
     }
-  
-  if ('best' %in% variants) {
-    results$best$log_rr <- t(sapply(results$best$quantiles, getsdRR))
-  }
   
   for (variant in variants) {
     results[[variant]]$rr_mean_intervals <-
@@ -531,7 +498,7 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
     factor(
       results$rr_mean_combo$Model,
       lapply(
-        analysis$.private$variants[c('time', 'time_no_offset', 'pca', 'full')], 
+        analysis$.private$variants[c('time', 'full')], 
         function(variant) variant$name
       )
     )
@@ -1045,7 +1012,7 @@ evaluatr.impact.pre = function(analysis, run.stl=TRUE) {
       analysis$covars$full,
       FUN = function(covars) {
         as.data.frame(list(cbind(
-          season.dummies, time_index = 1:nrow(covars)
+          season.dummies, time_index = 1:nrow(covars), covars[,c('spl1','spl2')]
         )))
       }
     ),
