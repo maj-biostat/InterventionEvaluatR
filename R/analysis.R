@@ -16,6 +16,7 @@
 #' @param date_name Name of the variable with the date for the time series
 #' @param outcome_name Name of the outcome (y) variable in the 'data' dataframe. Should be a count
 #' @param denom_name Name of the denominator variable in the 'data' dataframe. if there is no denominator, include a column of 1s.
+#' @param prune NRemove posterior matrices from results (very large), default to TRUE
 #' @param sparse_threshold Threshold for filtering out control variables based on sparsity (mean number of cases per time period). Defaults to 5. 
 #' @return Initialized analysis object, `analysis` as described below
 #'
@@ -47,6 +48,8 @@
 #' 
 #' `analysis$denom_name` as passed in in `denom_name`
 #' 
+#' `analysis$prune` as passed in in `prune`
+#'  
 #' `analysis$time_points` Vector of time points in the dataset
 #' 
 #' `analysis$set.burnN` as passed in in `set.burnN`
@@ -87,7 +90,8 @@ evaluatr.init <- function(country,
                         set.sampleN=10000,
                         denom_name,
                         log.covars=TRUE,
-                        sparse_threshold = 5) {
+                        sparse_threshold = 5,
+                        prune=TRUE) {
   analysis = listenv(
     time_points = NA,
     
@@ -151,6 +155,7 @@ evaluatr.init <- function(country,
   analysis$set.burnN <-set.burnN
   analysis$set.sampleN <-set.sampleN
   analysis$log.covars <- log.covars
+  analysis$prune <- prune
     normalizeDate <- function(d) {
     if (is.Date(d)) {
       d
@@ -468,6 +473,20 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
         simplify = 'array'
       )
   }
+  
+    #remove unneeded files now
+  if(analysis$prune){
+      for (variant in variants) {
+        for(grps in  analysis$groups){
+      #  results[[variant]]$quantiles[[grps]]$predict.bsts<-NULL
+        results[[variant]]$quantiles[[grps]]$beta.mat<-NULL
+        results[[variant]]$quantiles[[grps]]$pred_samples_post_full<-NULL
+        impact_results[[1]]$quantiles[['ec 2-23m A']]$rr.iter
+        }
+      }
+  }
+    #   lapply(analysis$results$impact, clean.output)
+  
   
   #Run a classic ITS analysis
   rr.its1 <-

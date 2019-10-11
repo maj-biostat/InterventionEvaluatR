@@ -131,6 +131,7 @@ group.labels<-as.character(unique(analysis$input_data[,analysis$group_name]))
 lapply(glmer_results,evaluatr.univariate.plot)
 ```
 
+
 ## Run the main analysis
 Save the results in object 'impact_results'
 ```{r main analysis, include = FALSE}
