@@ -481,7 +481,8 @@ evaluatr.impact = function(analysis, variants=names(analysis$.private$variants))
       #  results[[variant]]$quantiles[[grps]]$predict.bsts<-NULL
         results[[variant]]$quantiles[[grps]]$beta.mat<-NULL
         results[[variant]]$quantiles[[grps]]$pred_samples_post_full<-NULL
-        impact_results[[1]]$quantiles[['ec 2-23m A']]$rr.iter
+        results[[variant]]$quantiles[[grps]]$pred_samples<-NULL
+        results[[variant]]$quantiles[[grps]]$rr.iter
         }
       }
   }
