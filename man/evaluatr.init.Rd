@@ -9,7 +9,7 @@ evaluatr.init(country, data, pre_period_start = "start",
   eval_period_start, eval_period_end, n_seasons = 12,
   year_def = "cal_year", group_name, date_name, outcome_name,
   set.burnN = 5000, set.sampleN = 10000, denom_name,
-  log.covars = TRUE, sparse_threshold = 5)
+  log.covars = TRUE, sparse_threshold = 5, prune = TRUE)
 }
 \arguments{
 \item{country}{A one-word label for output (eg country or state name).}
@@ -45,6 +45,8 @@ evaluatr.init(country, data, pre_period_start = "start",
 \item{log.covars}{Should the covariate be log transformed? (default: TRUE)}
 
 \item{sparse_threshold}{Threshold for filtering out control variables based on sparsity (mean number of cases per time period). Defaults to 5.}
+
+\item{prune}{NRemove posterior matrices from results (very large), default to TRUE}
 }
 \value{
 Initialized analysis object, `analysis` as described below
@@ -77,6 +79,8 @@ Initialized analysis object, `analysis` as described below
 
 `analysis$denom_name` as passed in in `denom_name`
 
+`analysis$prune` as passed in in `prune`
+ 
 `analysis$time_points` Vector of time points in the dataset
 
 `analysis$set.burnN` as passed in in `set.burnN`
