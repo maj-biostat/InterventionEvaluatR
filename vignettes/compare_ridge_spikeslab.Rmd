@@ -155,10 +155,10 @@ ptm <- proc.time()
 results.ridge<-evaluatr.impact(analysis.ridge, variants=c('full', 'time', 'time_no_offset') )
 proc.time() - ptm
 
-# minutes with 5000 samples
-# ptm <- proc.time()
-# results.ridge.rep<-evaluatr.impact(analysis.ridge, variants=c('full', 'time', 'time_no_offset') )
-# proc.time() - ptm
+# 4 minutes with 5000 samples
+ ptm <- proc.time()
+ results.ridge.iid<-evaluatr.impact(analysis.ridge, variants=c('full', 'time', 'time_no_offset') )
+ proc.time() - ptm
 ```
 
 
@@ -176,6 +176,8 @@ results.table<- cbind.data.frame(
   htmlTable(table)
 }
 compare.results(results.ridge)
+compare.results(results.ridge.iid)
+
 #compare.results(results.ridge.rep)
 compare.results(results.spike)
 ```
@@ -241,4 +243,21 @@ top.betas<-lapply(beta1, function(x){
   })
 top.betas
 ```
+
+How much of the variability is explained by fixed vs random effects?
+```{r, fig.width=9, fig.height=4}
+par(mfrow=c(1,2))
+for(i in names(results.ridge$full$groups)){
+  rangey<-range(c(results.ridge$full$groups[[i]]$rand.eff.combined.q,results.ridge$full$groups[[i]]$fixed.effect.hdi ))
+matplot(results.ridge$full$groups[[i]]$rand.eff.combined.q,type='l', lty=c(2,1,2), col='black', bty='l', main="", ylab='Random', ylim=rangey)
+abline(h=0)
+matplot(results.ridge$full$groups[[i]]$fixed.effect.hdi,type='l', lty=c(1,2,2), col='black', bty='l', main="", ylab='Fixed',ylim=rangey)
+abline(h=0)
+}
+```
+
+```{r}
+
+```
+
 

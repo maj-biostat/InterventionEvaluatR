@@ -451,7 +451,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     betas.list<- mapply(next.beta.f, x=x.in.full.no.season[-1], covar.index=2:ncol(x.in.full.no.season), SIMPLIFY=T)
     next.betas<- paste(betas.list, collapse='+')  
     all.betas<-paste(first.beta,next.betas , sep='+')    
-    form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1', constr=T,extraconstr=list(A=A.full, e=e.full))") )
+    form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'iid')") )
     
     mod1.full = inla(form1, data = mod.df.full, 
                      control.predictor = list(compute=TRUE, link = 1), 
@@ -478,7 +478,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     mod.df.time$t<-1:nrow(mod.df.time)
     #mod.df.time.offset<-cbind.data.frame(mod.df.time,'log.offset'=log.offset)
     
-    form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'ar1', constr=T,extraconstr=list(A=A.time, e=e.time))") )
+    form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+ f(t, model = 'iid')") )
     
     if(model.variant=='time_no_offset'){
       mod2.time.no.offset = inla(form2, data = mod.df.time, control.predictor =   list(compute=TRUE, link = 1), family='poisson',control.compute=list(config = TRUE,waic=TRUE))
