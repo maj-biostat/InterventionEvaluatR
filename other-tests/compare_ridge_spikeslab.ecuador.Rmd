@@ -56,30 +56,18 @@ This Rmd file contains analyses of the data from S Africa. It uses a slightly di
 In this file, we use ridge regression to weight the control diseases. This is done in the INLA package, which is computationally faster than the spike and slab variable selection that has been used in the past. In many instance, the results are very close between the spike and slab method and the ridge regression method, but there are some instances where differences arise. The two approaches are compared here.
 
 ## Prepare the dataset
-```{r viewdata}
-   sa1<-read.csv('../data-raw/RSA.csv')
-
-   #Filter covariates that have no variance
-   sa.covars<-sa1[, -which(names(sa1) %in% c('Pneum','date','age')  )]
-   sa.covars$index<-1:nrow(sa.covars)
-   sa1.spl<-split(sa.covars, sa1$age)
-   variance.vars<-lapply(sa1.spl, function(x) apply(x[1:123,], 2, var)  ) #look in pre-vax period
-      for(i in 1:length(sa1.spl)){
-     sa1.spl[[i]]<-sa1.spl[[i]][,-which(variance.vars[[i]]==0)]
-   }
-   sa.covars<-rbind.fill(sa1.spl) #cobine back together
-   sa.covars<-sa.covars[order(sa.covars$index),]
-   sa.covars$index<-NULL
-   sa2<-cbind.data.frame(sa1[, which(names(sa1) %in% c('Pneum','date','age')  )], sa.covars)
-   sa2$date<-as.Date(sa1$date, '%Y-%m-%d' ) 
-   
-   exclude_covar <- c('AllRes', 	'PI', 	'POth', 	'AllDiar', 	 	'Menin', 	'BactMenin', 	'Bact', 	'OtMed', 	'Mast',	'SeptArthr', "denom", "A20_B99_excl_bac", "A16", "A17", "A18", "A19", "R00_R09", "R10_R19", "R20_R39", "R40_R49", "R50_R69", "R70_R94", "R95_R99", "D50_D89")      
-
-   sa2<-sa2[,-which(names(sa2) %in% exclude_covar)]
-   
-   sa3<-sa2[sa2$age %in% unique(sa2$age)[1:5],]
- 
+```{r}
+    data(ecuador_mortality, package = "InterventionEvaluatR") #load the data
+    head(ecuador_mortality[,1:5]) #View first few rows and columns
+    ds<-ecuador_mortality
+    ds$monthdate<-as.Date(ds$monthdate, tryFormats=c('%Y-%m-%d',
+                                                    '%m-%d-%Y',
+                                                    '%m/%d/%Y',
+                                                    '%Y/%m/%d',
+                                                    '%d/%m/%Y'
+                                                    ) )
 ```
+
 
 
 ## Set parameters for analysis
@@ -95,20 +83,20 @@ Here we need to set a few parameters. We Use the evaluatr.init() function to spe
 ```{r setup_data, echo=TRUE}
 
 analysis.spike <- evaluatr.init(
-  country = "SAfrica", data = sa2,
-  post_period_start = "2009-04-01", 
-  eval_period_start = "2010-04-01", 
-  eval_period_end = "2016-12-01", 
+  country = "Ecuador", data = ds,
+  post_period_start = "2010-08-01", #First 'post-intervention' month is Jan 2012
+  eval_period_start = "2011-08-01", #We ignore first 12 month of data to allow for vaccine ramp up
+  eval_period_end = "2015-12-01", #The evaluation period lasts 2 years
   n_seasons = 12, #This is monthly data, so select 12
   year_def = "cal_year", # we are in southern hemisphere, so aggregate results by calendar year (Jan-Dec)
-  group_name = "age",  #Strata categry name
-  date_name = "date", #Date variable name
-  outcome_name = "Pneum", #Outcome variable name
-  denom_name = "denom", #Denominator variable name
+  group_name = "age_group",  #Strata categry name
+  date_name = "monthdate", #Date variable name
+  outcome_name = "J12_J18_prim", #Outcome variable name
+  denom_name = "acm_noj_prim" , #Denominator variable name
+  log.covars=TRUE, #log-transform the covariates
   set.burnN=5000,
   set.sampleN=10000,
   ridge=F
-  
 )
 set.seed(1)
 ```
@@ -116,16 +104,17 @@ set.seed(1)
 ```{r setup_data2, echo=TRUE}
 
 analysis.ridge.iid <- evaluatr.init(
-  country = "SAfrica", data = sa2,
-  post_period_start = "2009-04-01", 
-  eval_period_start = "2010-04-01", 
-  eval_period_end = "2016-12-01", 
+  country = "Ecuador", data = ds,
+  post_period_start = "2010-08-01", #First 'post-intervention' month is Jan 2012
+  eval_period_start = "2011-08-01", #We ignore first 12 month of data to allow for vaccine ramp up
+  eval_period_end = "2015-12-01", #The evaluation period lasts 2 years
   n_seasons = 12, #This is monthly data, so select 12
   year_def = "cal_year", # we are in southern hemisphere, so aggregate results by calendar year (Jan-Dec)
-  group_name = "age",  #Strata categry name
-  date_name = "date", #Date variable name
-  outcome_name = "Pneum", #Outcome variable name
-  denom_name = "denom", #Denominator variable name
+  group_name = "age_group",  #Strata categry name
+  date_name = "monthdate", #Date variable name
+  outcome_name = "J12_J18_prim", #Outcome variable name
+  denom_name = "acm_noj_prim" , #Denominator variable name
+  log.covars=TRUE, #log-transform the covariates
   set.burnN=5000,
   set.sampleN=10000,
   ridge=T,
@@ -137,16 +126,17 @@ set.seed(1)
 ```{r setup_data3, echo=TRUE}
 
 analysis.ridge.ar1 <- evaluatr.init(
-  country = "SAfrica", data = sa2,
-  post_period_start = "2009-04-01", 
-  eval_period_start = "2010-04-01", 
-  eval_period_end = "2016-12-01", 
+ country = "Ecuador", data = ds,
+  post_period_start = "2010-08-01", #First 'post-intervention' month is Jan 2012
+  eval_period_start = "2011-08-01", #We ignore first 12 month of data to allow for vaccine ramp up
+  eval_period_end = "2015-12-01", #The evaluation period lasts 2 years
   n_seasons = 12, #This is monthly data, so select 12
   year_def = "cal_year", # we are in southern hemisphere, so aggregate results by calendar year (Jan-Dec)
-  group_name = "age",  #Strata categry name
-  date_name = "date", #Date variable name
-  outcome_name = "Pneum", #Outcome variable name
-  denom_name = "denom", #Denominator variable name
+  group_name = "age_group",  #Strata categry name
+  date_name = "monthdate", #Date variable name
+  outcome_name = "J12_J18_prim", #Outcome variable name
+  denom_name = "acm_noj_prim" , #Denominator variable name
+  log.covars=TRUE, #log-transform the covariates
   set.burnN=5000,
   set.sampleN=10000,
   ridge=T,
@@ -162,7 +152,7 @@ With spike and slab without STL-PCA, completes in 10min with 7 cores; INLA runs 
 
 ptm <- proc.time()
 #results1<-evaluatr.impact(analysis)
-results.spike<-evaluatr.impact(analysis.spike, variants=c('full', 'time', 'time_no_offset') )
+results.spike<-evaluatr.impact(analysis.spike, variants=c('full') )
 
 proc.time() - ptm
 
@@ -207,7 +197,7 @@ results.table<- cbind.data.frame(
 }
 compare.results(results.ridge.ar1)
 compare.results(results.ridge.iid)
-#compare.results(results.spike)
+compare.results(results.spike)
 ```
 
 
@@ -292,11 +282,8 @@ random.iid<-lapply(results.ridge.iid$full$groups, function(x) x$rand.eff.combine
 
 for(i in (1: length(fixed))){
   yrange<-range(c(fixed[[i]], random[[i]]))
-  matplot(fixed.iid[[i]], type='l', bty='l', lty=c(1,2,2), col='gray', ylim=yrange)
-  matplot(fixed[[i]], type='l', bty='l', lty=c(1,2,2), col='red', ylim=yrange, add=T)
-
-    matplot(random.iid[[i]], type='l', bty='l', lty=c(2,1,2), col='gray', ylim=yrange)
-    matplot(random[[i]], type='l', bty='l', lty=c(2,1,2), col='red', ylim=yrange, add=T)
+  matplot(fixed[[i]], type='l', bty='l', lty=c(1,2,2), col='gray', ylim=yrange)
+    matplot(random[[i]], type='l', bty='l', lty=c(2,1,2), col='gray', ylim=yrange)
   
 }
 

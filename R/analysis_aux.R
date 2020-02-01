@@ -395,23 +395,6 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
   #Should be already scaled, but doesn't hurt...
   x.scale<-apply(x,2, function(z) scale(z)) 
   
-  y.aware.scale<- apply(x, 2, function(x1){
-    log.y.pre.scale<- scale(log(y.pre+0.5))
-    log.y.pre.scale<-log.y.pre.scale[!is.na(log.y.pre.scale)]
-    reg<-lm(log.y.pre.scale~x1[time_points<analysis$intervention_date])
-    slope<- reg$coefficients[2]
-    x.scale<-x1*slope - mean(x1*slope)
-    return(x.scale)
-  })
-  pca1<- prcomp(y.aware.scale, center = FALSE,scale. = FALSE)
-  #n.pcs.keep<-sum(pca1$sdev>1)
-  n.pcs.keep<-5
-  pcs<-pca1$x
-  pcs<-apply(pcs,2, scale) #SCALE THE PCS prior to regression!
-  pcs.combo<-cbind.data.frame( 'month'=as.factor(month(time_points)),pcs[,1:n.pcs.keep, drop=F] )
-  form0<-as.formula(paste0('~', paste(names(pcs.combo), collapse='+')))
-  pcs.df<-as.data.frame(model.matrix(form0, data=pcs.combo)[,-1])
-  
   df1<-cbind.data.frame(y.pre, 'month'=as.factor(month(time_points)), y, x.scale )
   df1$t<-1:nrow(df1)
   covar.df.full<-cbind.data.frame( x.scale, 'month'=df1$month) 
@@ -422,10 +405,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
   
   if(model.variant=='full'){  
     
-    A.full<- rbind(t(pcs.df[,names(pcs.df), drop=F]))
-    A.full[,is.na(mod.df.full$y.pre)]<-0  #extraploation period shouldn't factor into constraint
-    e.full=rep(0, nrow(A.full))
-    
+   
     n <- nrow(mod.df.full)
     X <- matrix(1,nrow = n, ncol= 1)
     Z <- as.matrix(x.in.full) 
@@ -453,14 +433,8 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     betas.list<- mapply(next.beta.f, x=x.in.full.no.season[-1], covar.index=2:ncol(x.in.full.no.season), SIMPLIFY=T)
     next.betas<- paste(betas.list, collapse='+')  
     all.betas<-paste(first.beta,next.betas , sep='+')    
-    if(error_dist=='ar1'){
-    #form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1', constr=T,extraconstr=list(A=A.full, e=e.full))") )
-    form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1')") )
-      
-       }else{
     form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'iid')") )
       
-    }
     mod1.full = inla(form1, data = mod.df.full, 
                      control.predictor = list(compute=TRUE, link = 1), 
                      family='poisson',
@@ -484,12 +458,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     A.time[,is.na(mod.df.time$y.pre)]<-0  #extraploation period shouldn't factor into constraint
     e.time=rep(0, nrow(A.time))
     mod.df.time$t<-1:nrow(mod.df.time)
-    #mod.df.time.offset<-cbind.data.frame(mod.df.time,'log.offset'=log.offset)
-    if(error_dist=='ar1'){
-    form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'ar1', constr=T,extraconstr=list(A=A.time, e=e.time))") )
-    }else{
     form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'iid')") )
-    }
     if(model.variant=='time_no_offset'){
       mod2.time.no.offset = inla(form2, data = mod.df.time, control.predictor =   list(compute=TRUE, link = 1), family='poisson',control.compute=list(config = TRUE,waic=TRUE))
       waic<-mod2.time.no.offset$waic$waic
@@ -520,40 +489,61 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
   rand.eff.select.t1<-which(substr(post.labels,1,2 )=='t:')
   
   if(ds$ridge==T){  
+    covar.select.intercept<-grep('Intercept', post.labels)
     covar.select.betas<-grep('beta1:', post.labels)
     covar.select.months<-grep('month', post.labels)
     covar.select<-c(covar.select.betas,covar.select.months)
+    covar.select.int<-c(covar.select.intercept,covar.select.betas,covar.select.months) #including intercept
+    beta.posterior.int<-(posterior.samples[covar.select.int,]) 
+    fixed.effect.int<- as.matrix(cbind(rep(1, nrow(ds$x.in) ), ds$x.in)) %*% beta.posterior.int #fixed piece of regression, excluding intercept
   }else{
     covar.select<- which(names(ds$x.in)  %in% sub("\\:.*", "", post.labels))
   }
   
   beta.posterior<-(posterior.samples[covar.select,]) 
-  beta.posterior.median<- apply(beta.posterior,1,median)
+    beta.posterior.median<- apply(beta.posterior,1,median)
   beta.posterior.hdi<-cbind(beta.posterior.median,t(hdi(t(beta.posterior), credMass = 0.95)))
   row.names(beta.posterior.hdi)<-names(ds$x.in)
   
   beta.fix.posterior.hdi<-beta.posterior.hdi[-grep('month',names(ds$x.in)),]
   
   fixed.effect<- as.matrix(ds$x.in) %*% beta.posterior #fixed piece of regression, excluding intercept
+
   fixed.effect.hdi<-t(hdi(t(fixed.effect), credMass = 0.95))
   fixed.effect.median<-apply(fixed.effect,1, median)
   fixed.effect.hdi<-cbind.data.frame('median'=fixed.effect.median, fixed.effect.hdi)
   
-  posterior.preds<-exp(posterior.samples[preds.select,]) #lambda
+  if(ds$ridge==T & error_dist=='ar1'){
+    log.pred.median<-apply(posterior.samples[preds.select,],1,median)
+    ar1.ds<-cbind.data.frame('y.pre'=y.pre,  't'=1:length(y.pre),'log.pred.median'=log.pred.median)
+    mod.ar1 = inla(y.pre~ 0 + f(t, model = 'ar1') , offset=log.pred.median, data = ar1.ds, 
+                     control.predictor = list(compute=TRUE, link = 1), 
+                     family='poisson',
+                     control.compute=list(config = TRUE))
+    posterior.list.ar1<-inla.posterior.sample(n=500, mod.ar1, seed=123)
+    posterior.samples.ar1<- sapply(posterior.list.ar1, '[[', 'latent')
+    post.labels.ar1<-dimnames(posterior.list.ar1[[1]]$latent)[[1]]
+    rand.eff.select.ar1<-which(substr(post.labels.ar1,1,2 )=='t:')
+    rand.eff.t1<-posterior.samples.ar1[rand.eff.select.ar1,]
+    posterior.preds<- exp(fixed.effect.int + rand.eff.t1)
+    rho1<- mod.ar1$summary.hyperpar[2,c('0.5quant','0.025quant', '0.975quant')]
+  }else{
+    posterior.preds<-exp(posterior.samples[preds.select,])
+    rand.eff.t1<-posterior.samples[rand.eff.select.t1,]
+    rho1<-NA
+  }
+  
   #now take Poisson samples withmean of lambda
   posterior.preds.counts<- matrix(rpois(n=length(posterior.preds), lambda=posterior.preds), nrow=nrow(posterior.preds), ncol=ncol(posterior.preds))
   
-  rand.eff.t1<-posterior.samples[rand.eff.select.t1,]
   rand.eff1.q<-t(apply(rand.eff.t1, 1, quantile, probs=c(0.025,0.5,0.975)))
   
   posterior.preds.q<-t(apply(posterior.preds.counts,1,quantile, probs=c(0.025, 0.5, 0.975)))
   posterior.median<-as.integer(round(t(apply(posterior.preds.counts,1,median))))
   ci<- t(hdi(t(posterior.preds.counts), credMass = 0.95))
   posterior.pred.hdi<- cbind.data.frame('median'=posterior.median, ci)
-  
-  rho1<-ds$fitted.model$summary.hyperpar[3,c('0.5quant','0.025quant', '0.975quant')]
-  
-  rand.eff.combined<-rand.eff.t1 #+rand.eff.t2
+
+  rand.eff.combined<-rand.eff.t1 
   rand.eff.combined.q<-t(apply(rand.eff.combined, 1, quantile, probs=c(0.025,0.5,0.975)))
   
   log.rr.pointwise<- apply(posterior.preds.counts, 2, function(x)log( (mod.df.full$y+1)/ (x+1)) )
