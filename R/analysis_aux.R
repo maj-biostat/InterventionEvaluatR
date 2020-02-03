@@ -516,7 +516,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
   if(ds$ridge==T & error_dist=='ar1'){
     log.pred.median<-apply(posterior.samples[preds.select,],1,median)
     ar1.ds<-cbind.data.frame('y.pre'=y.pre,  't'=1:length(y.pre),'log.pred.median'=log.pred.median)
-    mod.ar1 = inla(y.pre~ 0 + f(t, model = 'ar1') , offset=log.pred.median, data = ar1.ds, 
+    mod.ar1 = inla(y.pre~ 0 + f(t, model = 'ar1') + offset(log.pred.median), data = ar1.ds, 
                      control.predictor = list(compute=TRUE, link = 1), 
                      family='poisson',
                      control.compute=list(config = TRUE))
