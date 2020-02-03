@@ -419,6 +419,8 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
   #Matrix for restriction random effects
   x.in.full<-as.data.frame(model.matrix(~. , data=covar.df.full))[,-1] #dummies for month, remove intercept
   mod.df.full<- cbind.data.frame(y,y.pre, x.in.full)
+  hyper3 <- list(theta1 = list(prior="pc.prec", param=c(0.06, 0.008)),
+                 theta2 = list(prior="pc.cor1", param=c(0.9, 0.9)) )
   
   if(model.variant=='full'){  
     
@@ -453,8 +455,9 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     betas.list<- mapply(next.beta.f, x=x.in.full.no.season[-1], covar.index=2:ncol(x.in.full.no.season), SIMPLIFY=T)
     next.betas<- paste(betas.list, collapse='+')  
     all.betas<-paste(first.beta,next.betas , sep='+')    
+   
     if(error_dist=='ar1'){
-    form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1', constr=T,extraconstr=list(A=A.full, e=e.full))") )
+    form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1', hyper=hyper3)") )
     #form1<- as.formula(paste0("y.pre ~", paste(names(x.in.full.season), collapse="+"),"+", all.betas,    "+ f(t, model = 'ar1')") )
       
        }else{
@@ -486,7 +489,7 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
     mod.df.time$t<-1:nrow(mod.df.time)
     #mod.df.time.offset<-cbind.data.frame(mod.df.time,'log.offset'=log.offset)
     if(error_dist=='ar1'){
-    form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'ar1', constr=T,extraconstr=list(A=A.time, e=e.time))") )
+    form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'ar1', hyper=hyper3)") )
     }else{
     form2<- as.formula(paste0('y.pre ~',  paste(names(x.in.time), collapse='+'), "+  f(t, model = 'iid')") )
     }

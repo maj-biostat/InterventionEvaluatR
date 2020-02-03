@@ -207,7 +207,7 @@ results.table<- cbind.data.frame(
 }
 compare.results(results.ridge.ar1)
 compare.results(results.ridge.iid)
-compare.results(results.spike)
+#compare.results(results.spike)
 ```
 
 
@@ -233,7 +233,7 @@ print.cum(results.spike)
 ```
 
 ```{r mainplot1, echo=FALSE}
-plots.spike <- evaluatr.plots(analysis.spike)
+#plots.spike <- evaluatr.plots(analysis.spike)
 plots.ridge <- evaluatr.plots(analysis.ridge.iid)
 plots.ridge.ar1 <- evaluatr.plots(analysis.ridge.ar1)
 
@@ -244,7 +244,7 @@ plots.ridge.ar1 <- evaluatr.plots(analysis.ridge.ar1)
 
 This first plot shows a monthly time series, with observed, fitted, and counterfacual values. The observed number of deaths is shown in the black line. The fitted values for the pre-vaccine period are shown in the red dotted line, and the counterfactual estimate with its 95% credible interval is shown as the white dotted line and gray shaded area. if the black line is below the gray shaded area, this would indicate that obsrved cases are lower than expected based on changes in the control diseases in the post-vaccine period. If the controls appropriately adjust for underlying trends, then this would reflect an effect of the vaccine. 
 ```{r, fig.width=5, fig.height=4}
-  plots.spike$groups[["1-4 years"]]$pred_full 
+  #plots.spike$groups[["" years"]]$pred_full 
   plots.ridge$groups[["1-4 years"]]$pred_full 
   plots.ridge.ar1$groups[["1-4 years"]]$pred_full 
 
