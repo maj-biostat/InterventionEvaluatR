@@ -462,9 +462,11 @@ inla_mods<-function(zoo_data=analysis$.private$data[['full']],
       
     }
     mod1.full = inla(form1, data = mod.df.full, 
-                     control.predictor = list(compute=TRUE, link = 1), 
                      family='poisson',
-                     control.compute=list(config = TRUE,waic=TRUE))
+                     control.compute=list(config = TRUE,waic=TRUE),
+    control.family = list(hyper = list(prec = list(initial = 10),control.predictor = list(compute=TRUE, link = 1)  ) ) )
+ 
+    
     waic<-mod1.full$waic$waic
     pd<- mod1.full$waic$p.eff
     ds<-list('fitted.model'=mod1.full, 'mod.df'=mod.df.full, 'x.in'=x.in.full,'offset'=NA,'offset.used'=F,'ridge'=T, 'waic'=waic, 'pd'=pd)
