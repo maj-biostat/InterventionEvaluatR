@@ -57,9 +57,11 @@ South Africa introduced PCV7 in 2009. Estimating the impact of the vaccine on mo
 
 
 ## Read in and explore data
-**CHANGE THIS TO DOWNLOAD FROM GITHUB**
+Can read directly from github
 ```{r}
-d2 <- read.csv('./Data/RSA.csv') #imports file into R and saves as object 'd2'
+#d2 <- read.csv('./Data/RSA.csv') #imports file into R and saves as object 'd2'
+
+d2 <- read.csv('https://github.com/weinbergerlab/InterventionEvaluatR/raw/master/vignettes/Data/RSA.csv')
 ```
 
 ### Look at the first few lines
